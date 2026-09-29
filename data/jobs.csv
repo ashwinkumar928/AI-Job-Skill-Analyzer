@@ -1,0 +1,9 @@
+job_title,company,location,job_description,skills
+AI Analyst,TechNova,Bangalore,"Analyze business data and build AI-assisted insights using Python and SQL","Python,SQL,Pandas,Machine Learning"
+Data Analyst,DataWorks,Delhi,"Analyze datasets, create reports and dashboards using SQL and Excel","SQL,Excel,Power BI,Pandas"
+Frontend Developer,WebCraft,Pune,"Build responsive web interfaces using React and JavaScript","React,JavaScript,HTML,CSS"
+Backend Developer,CodeBase,Hyderabad,"Develop APIs and backend services using Node.js and PostgreSQL","Node.js,Express.js,PostgreSQL,REST APIs"
+Full Stack Developer,DevLabs,Mumbai,"Develop frontend and backend applications using React and Node.js","React,Node.js,JavaScript,MongoDB"
+Machine Learning Engineer,AILabs,Bangalore,"Build machine learning models and process data using Python","Python,Scikit-learn,Pandas,NumPy"
+Software Engineer,NextGen,Chennai,"Develop scalable applications using Java and SQL","Java,SQL,Git"
+AI Analyst,InsightAI,Noida,"Analyze datasets and use machine learning techniques to generate business insights","Python,SQL,Machine Learning,Excel"
