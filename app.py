@@ -1,69 +1,14 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-# Keep the dashboard available before the new dependency is installed.
-try:
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity
-    SKLEARN_AVAILABLE = True
-except ModuleNotFoundError as error:
-    if error.name != "sklearn":
-        raise
-    SKLEARN_AVAILABLE = False
+from analysis import (
+    SKLEARN_AVAILABLE, clean_jobs, count_values, display_skill,
+    display_skills, match_jobs, normalize_skills,
+)
 
 st.set_page_config(page_title="AI Job Skill Analyzer", page_icon="📊", layout="wide")
-
-
-# These labels affect display only; matching still uses lowercase skill names.
-SKILL_DISPLAY_NAMES = {
-    "sql": "SQL",
-    "python": "Python",
-    "javascript": "JavaScript",
-    "node.js": "Node.js",
-    "react": "React",
-    "machine learning": "Machine Learning",
-    "power bi": "Power BI",
-    "rest apis": "REST APIs",
-    "pandas": "Pandas",
-    "numpy": "NumPy",
-    "scikit-learn": "Scikit-learn",
-    "html": "HTML",
-    "css": "CSS",
-    "express.js": "Express.js",
-    "postgresql": "PostgreSQL",
-    "mongodb": "MongoDB",
-    "java": "Java",
-    "git": "Git",
-    "excel": "Excel",
-}
-
-
-def display_skill(skill):
-    # Use title case as a simple fallback for skills outside the dictionary.
-    return SKILL_DISPLAY_NAMES.get(skill, skill.title())
-
-
-def display_skills(skills):
-    return ", ".join(display_skill(skill) for skill in skills)
-
-
-def normalize_skills(skill_text):
-    # Use the same comparison rules for user input and job requirements.
-    if pd.isna(skill_text):
-        return []
-    skills = []
-    for skill in str(skill_text).split(","):
-        skill = " ".join(skill.lower().split())
-        if skill and skill not in skills:
-            skills.append(skill)
-    return skills
-
-
-def count_values(column):
-    # Exclude missing and blank labels from metrics and charts.
-    return column.dropna().astype(str).str.strip().replace("", pd.NA).value_counts()
 
 
 def show_chart(title, counts):
@@ -75,71 +20,6 @@ def show_chart(title, counts):
             st.bar_chart(counts.rename("Jobs"), horizontal=True, sort=False)
 
 
-def calculate_similarity(jobs, user_skills):
-    if jobs.empty:
-        return []
-    if not SKLEARN_AVAILABLE:
-        # Preserve rule-based ranking until the optional dependency is installed.
-        # The UI labels these unavailable scores rather than displaying zeros.
-        return [0.0] * len(jobs)
-
-    # Missing fields contribute empty text, not the literal word "nan".
-    text_columns = ["job_title", "job_description", "skills"]
-    job_text = jobs.reindex(columns=text_columns).fillna("").astype(str)
-    combined_text = job_text.agg(" ".join, axis=1).str.lower()
-    query_text = " ".join(user_skills)
-
-    # Fit jobs and query together so all vectors use the same vocabulary and IDF.
-    # Query-only words are retained too, even when no job contains them.
-    documents = combined_text.tolist() + [query_text]
-    vectorizer = TfidfVectorizer()
-
-    # The default tokenizer ignores punctuation and single-character words.
-    # If nothing can be tokenized, there is no text similarity to calculate.
-    analyzer = vectorizer.build_analyzer()
-    if not any(analyzer(document) for document in documents):
-        return [0.0] * len(jobs)
-
-    tfidf_matrix = vectorizer.fit_transform(documents)
-    job_vectors = tfidf_matrix[:-1]
-    query_vector = tfidf_matrix[-1:]
-    similarities = cosine_similarity(query_vector, job_vectors).flatten()
-
-    # Clamp tiny floating-point errors before converting 0-1 scores to 0-100.
-    return (similarities.clip(0, 1) * 100).tolist()
-
-
-def match_jobs(jobs, user_skills):
-    similarity_scores = calculate_similarity(jobs, user_skills)
-    results = []
-    # Position keeps each similarity attached to its job, even with custom indices.
-    for position, (_, job) in enumerate(jobs.iterrows()):
-        required = normalize_skills(job["skills"])
-        # Matched requirements are present in the user's normalized list.
-        matched = [skill for skill in required if skill in user_skills]
-        # Missing requirements are the ones the user has not listed.
-        missing = [skill for skill in required if skill not in user_skills]
-        # An unknown requirement list receives zero, avoiding division by zero.
-        percentage = len(matched) / len(required) * 100 if required else 0.0
-        results.append({
-            "title": job["job_title"],
-            "company": job["company"],
-            "location": job["location"],
-            "matched": matched,
-            "missing": missing,
-            "percentage": percentage,
-            "ai_similarity": similarity_scores[position],
-            "has_requirements": bool(required),
-        })
-    # Sort by text similarity first, then exact skill overlap to break ties.
-    # Keep full precision; completely tied jobs retain their dataset order.
-    return sorted(
-        results,
-        key=lambda job: (job["ai_similarity"], job["percentage"]),
-        reverse=True,
-    )
-
-
 # Resolve the CSV relative to this file, even when launched from another folder.
 data_path = Path(__file__).parent / "data" / "jobs.csv"
 try:
@@ -148,13 +28,16 @@ except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as error:
     st.error(f"Could not load data/jobs.csv: {error}")
     st.stop()
 
-required_columns = {"job_title", "company", "location", "skills"}
-missing_columns = required_columns - set(df.columns)
-if missing_columns:
-    st.error("Dataset is missing required columns: " + ", ".join(sorted(missing_columns)))
+try:
+    df, removed_duplicates = clean_jobs(df)
+except ValueError as error:
+    st.error(str(error))
     st.stop()
 
-# Keep df unchanged for the dataset overview. Calculate summaries separately.
+if removed_duplicates:
+    st.info(f"Removed {removed_duplicates} duplicate job record(s) before analysis.")
+
+# All charts, metrics, recommendations, and the overview use cleaned data.
 skill_lists = df["skills"].apply(normalize_skills)
 skill_counts = skill_lists.explode().dropna().value_counts()
 # Rename a separate Series for presentation without changing comparison values.
@@ -169,6 +52,7 @@ with st.sidebar:
     page = st.radio("Navigation", ["Home", "Market Analysis", "Job Matcher", "Dataset Overview"])
     st.divider()
     st.caption("Source: data/jobs.csv")
+    st.caption("Synthetic sample jobs and fictional companies for demonstration.")
     st.caption("Insights reflect the loaded dataset, not the entire job market.")
 
 if page == "Home":
@@ -280,9 +164,9 @@ elif page == "Dataset Overview":
     columns = st.columns(4)
     columns[0].metric("Rows", len(df))
     columns[1].metric("Columns", len(df.columns))
-    columns[2].metric("Missing Values", int(df.isna().sum().sum()))
-    columns[3].metric("Duplicate Rows", int(df.duplicated().sum()))
-    st.caption("Duplicates are exact repeated rows after the first occurrence; they remain in the analysis.")
+    columns[2].metric("Missing Values", int(df.eq("").sum().sum()))
+    columns[3].metric("Duplicates Removed", removed_duplicates)
+    st.caption("Cleaned data: duplicate comparisons ignore case, spacing, and skill order. Blank companies and locations are excluded from category counts.")
     st.divider()
     st.subheader("Full dataset")
     st.dataframe(df, hide_index=True, width="stretch")
@@ -290,11 +174,8 @@ elif page == "Dataset Overview":
     st.write(", ".join(df.columns))
     st.subheader("Missing values by column")
     st.dataframe(
-        df.isna().sum().rename_axis("Column").reset_index(name="Missing Values"),
+        df.eq("").sum().rename_axis("Column").reset_index(name="Missing Values"),
         hide_index=True,
         width="stretch",
     )
-    st.caption("Missing values use Pandas isna(); whitespace-only cells are not counted as missing.")
-    if df.duplicated().any():
-        st.subheader("Duplicate rows (additional occurrences)")
-        st.dataframe(df[df.duplicated()], hide_index=True, width="stretch")
+    st.caption("Missing values count empty cleaned cells. Missing titles display as Unknown role; unknown requirements receive a 0% exact match.")
